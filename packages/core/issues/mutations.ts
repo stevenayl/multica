@@ -327,9 +327,14 @@ export function useCreateComment(issueId: string) {
         created_at: comment.created_at,
         updated_at: comment.updated_at,
       };
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old ? [...old, entry] : [entry],
-      );
+      // Dedupe by id: the `comment:created` WS event may have already added
+      // this entry from the broadcast path before this onSuccess fires. Skip
+      // the append if the entry is already in the cache.
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return [entry];
+        if (old.some((e) => e.id === entry.id)) return old;
+        return [...old, entry];
+      });
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
