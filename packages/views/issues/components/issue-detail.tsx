@@ -24,7 +24,15 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import {
+  ContentEditor,
+  type ContentEditorRef,
+  type ContentEditorResolution,
+  TitleEditor,
+  useFileDropZone,
+  FileDropOverlay,
+  DescriptionConflictDialog,
+} from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -606,6 +614,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
+
+  // Conflict dialog state for description external-edit conflicts. When the
+  // editor blurs and a real conflict is detected, `handleDescriptionConflict`
+  // captures the snapshot in state and returns a promise; the dialog drives
+  // resolution. Snapshot is intentionally frozen the moment the conflict
+  // surfaces — later WS updates do not mutate what the user is comparing.
+  const [descConflict, setDescConflict] = useState<{
+    local: string;
+    external: string;
+    resolve: (r: ContentEditorResolution) => void;
+  } | null>(null);
+
+  const handleDescriptionConflict = useCallback(
+    ({ local, external }: { local: string; external: string }) =>
+      new Promise<ContentEditorResolution>((resolve) => {
+        setDescConflict({ local, external, resolve });
+      }),
+    [],
+  );
   // Description uploads don't pass issueId — the URL lives in the markdown.
   // This avoids stale attachment records when users delete images from the editor.
   const handleDescriptionUpload = useCallback(
@@ -974,9 +1001,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               placeholder={t(($) => $.detail.desc_placeholder)}
               onUpdate={(md) => handleUpdateField({ description: md })}
               onUploadFile={handleDescriptionUpload}
+              onExternalConflict={handleDescriptionConflict}
               debounceMs={1500}
               currentIssueId={id}
             />
+            {descConflict && (
+              <DescriptionConflictDialog
+                open
+                local={descConflict.local}
+                external={descConflict.external}
+                onResolve={(r) => {
+                  descConflict.resolve(r);
+                  setDescConflict(null);
+                }}
+              />
+            )}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar
