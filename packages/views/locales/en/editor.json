@@ -53,7 +53,16 @@
     "copy_code": "Copy code"
   },
   "file_card": {
-    "uploading": "Uploading {{filename}}"
+    "uploading": "Uploading {{filename}}",
+    "preview": "Preview"
+  },
+  "file_preview": {
+    "loading": "Loading preview…",
+    "load_failed": "Failed to load file",
+    "truncated": "file truncated for preview",
+    "unsupported": "No preview available for {{filename}}",
+    "download": "Download",
+    "preview": "Preview"
   },
   "title_editor": {
     "title_aria_label": "Title"

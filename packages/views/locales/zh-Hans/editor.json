@@ -53,7 +53,16 @@
     "copy_code": "复制代码"
   },
   "file_card": {
-    "uploading": "正在上传 {{filename}}"
+    "uploading": "正在上传 {{filename}}",
+    "preview": "预览"
+  },
+  "file_preview": {
+    "loading": "加载预览中…",
+    "load_failed": "无法加载文件",
+    "truncated": "文件过大，已截断预览",
+    "unsupported": "{{filename}} 暂不支持预览",
+    "download": "下载",
+    "preview": "预览"
   },
   "title_editor": {
     "title_aria_label": "标题"
