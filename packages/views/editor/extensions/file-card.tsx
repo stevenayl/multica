@@ -38,7 +38,7 @@ function FileCardView({ node }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
   const filename = (node.attrs.filename as string) || "";
   const uploading = node.attrs.uploading as boolean;
-  const { openByUrl } = useAttachmentDownloadResolver();
+  const { openByUrl, resolveAttachment } = useAttachmentDownloadResolver();
   const [previewOpen, setPreviewOpen] = useState(false);
 
   const openFile = () => {
@@ -47,6 +47,7 @@ function FileCardView({ node }: NodeViewProps) {
 
   const previewable =
     !uploading && href !== "" && getRendererKey(filename) !== "unsupported";
+  const sizeBytes = resolveAttachment(href)?.size_bytes;
 
   return (
     <NodeViewWrapper as="div" className="file-card-node" data-type="fileCard">
@@ -97,6 +98,7 @@ function FileCardView({ node }: NodeViewProps) {
           onOpenChange={setPreviewOpen}
           url={href}
           filename={filename}
+          sizeBytes={sizeBytes}
         />
       )}
     </NodeViewWrapper>

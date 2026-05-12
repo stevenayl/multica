@@ -9,6 +9,9 @@ interface ResolvedDownload {
   // Returns the attachment id for a URL referenced in the markdown, or
   // `undefined` if it's an external link we don't manage.
   resolveAttachmentId: (url: string) => string | undefined;
+  // Returns the full attachment record for a URL, used by preview to read
+  // size_bytes for the per-kind size cap.
+  resolveAttachment: (url: string) => Attachment | undefined;
   // Called by NodeView click handlers. Re-signs through `getAttachment` when
   // the URL maps to a known attachment; falls back to `openExternal` for
   // external URLs so Electron still routes through the IPC bridge instead of
@@ -35,6 +38,10 @@ export function AttachmentDownloadProvider({ attachments, children }: ProviderPr
       resolveAttachmentId: (url) => {
         if (!url || !attachments?.length) return undefined;
         return attachments.find((a) => a.url === url)?.id;
+      },
+      resolveAttachment: (url) => {
+        if (!url || !attachments?.length) return undefined;
+        return attachments.find((a) => a.url === url);
       },
       openByUrl: (url) => {
         const id = url && attachments?.length
@@ -67,11 +74,16 @@ export function useAttachmentDownloadResolver(): ResolvedDownload {
   // Hooks-must-be-unconditional: always create the fallback object, but
   // memoization is unnecessary here because each NodeView render also
   // re-runs the click handler closure.
-  if (ctx) return ctx;
-  return {
-    resolveAttachmentId: () => undefined,
-    openByUrl: (url) => {
-      if (url) openExternal(url);
-    },
-  };
+  return ctx ?? FALLBACK_RESOLVER;
 }
+
+// Module-scope so consumers that depend on the resolver in `useEffect`
+// don't re-fire on every render when no provider is mounted (would
+// otherwise create an infinite loop on any setState inside the effect).
+const FALLBACK_RESOLVER: ResolvedDownload = {
+  resolveAttachmentId: () => undefined,
+  resolveAttachment: () => undefined,
+  openByUrl: (url) => {
+    if (url) openExternal(url);
+  },
+};

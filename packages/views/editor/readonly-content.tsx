@@ -30,7 +30,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 // @ts-expect-error -- hast-util-to-html has no bundled type declarations
 import { toHtml } from "hast-util-to-html";
-import { Maximize2, Download, Link as LinkIcon, FileText } from "lucide-react";
+import { Maximize2, Download, Eye, Link as LinkIcon, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
@@ -45,6 +45,8 @@ import { openLink, isMentionHref } from "./utils/link-handler";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { useDownloadAttachment } from "./use-download-attachment";
+import { FilePreviewModal } from "../file-preview/file-preview-modal";
+import { getRendererKey } from "../file-preview/get-renderer";
 import "katex/dist/katex.min.css";
 import "./content-editor.css";
 
@@ -240,13 +242,17 @@ function ReadonlyFileCard({
   href,
   filename,
   resolveAttachmentId,
+  resolveAttachmentSize,
   onDownload,
 }: {
   href: string;
   filename: string;
   resolveAttachmentId: (url: string) => string | undefined;
+  resolveAttachmentSize: (url: string) => number | undefined;
   onDownload: (attachmentId: string) => void;
 }) {
+  const { t } = useT("editor");
+  const [previewOpen, setPreviewOpen] = useState(false);
   const handleClick = () => {
     const id = resolveAttachmentId(href);
     if (id) {
@@ -255,12 +261,25 @@ function ReadonlyFileCard({
     }
     openExternal(href);
   };
+  const previewable = href !== "" && getRendererKey(filename) !== "unsupported";
+  const sizeBytes = resolveAttachmentSize(href);
+  const attachmentId = resolveAttachmentId(href);
   return (
     <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
       <FileText className="size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm">{filename}</p>
       </div>
+      {previewable && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          title={t(($) => $.file_card.preview)}
+          onClick={() => setPreviewOpen(true)}
+        >
+          <Eye className="size-3.5" />
+        </button>
+      )}
       {href && (
         <button
           type="button"
@@ -270,12 +289,23 @@ function ReadonlyFileCard({
           <Download className="size-3.5" />
         </button>
       )}
+      {previewOpen && (
+        <FilePreviewModal
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          url={href}
+          filename={filename}
+          sizeBytes={sizeBytes}
+          attachmentId={attachmentId}
+        />
+      )}
     </div>
   );
 }
 
 function buildComponents(
   resolveAttachmentId: (url: string) => string | undefined,
+  resolveAttachmentSize: (url: string) => number | undefined,
   onDownload: (attachmentId: string) => void,
 ): Partial<Components> {
   return {
@@ -305,6 +335,7 @@ function buildComponents(
             href={href}
             filename={filename}
             resolveAttachmentId={resolveAttachmentId}
+            resolveAttachmentSize={resolveAttachmentSize}
             onDownload={onDownload}
           />
         );
@@ -410,9 +441,17 @@ export const ReadonlyContent = memo(function ReadonlyContent({
     [attachments],
   );
 
+  const resolveAttachmentSize = useCallback(
+    (url: string): number | undefined => {
+      if (!url || !attachments?.length) return undefined;
+      return attachments.find((a) => a.url === url)?.size_bytes;
+    },
+    [attachments],
+  );
+
   const components = useMemo(
-    () => buildComponents(resolveAttachmentId, download),
-    [resolveAttachmentId, download],
+    () => buildComponents(resolveAttachmentId, resolveAttachmentSize, download),
+    [resolveAttachmentId, resolveAttachmentSize, download],
   );
 
   return (

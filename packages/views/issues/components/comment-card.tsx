@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, Download, FileText, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, Download, Eye, FileText, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -31,6 +31,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { timeAgo } from "@multica/core/utils";
 import { ContentEditor, type ContentEditorRef, copyMarkdown, ReadonlyContent, useFileDropZone, FileDropOverlay, useDownloadAttachment } from "../../editor";
+import { FilePreviewModal } from "../../file-preview/file-preview-modal";
+import { getRendererKey } from "../../file-preview/get-renderer";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -121,8 +123,49 @@ function DeleteCommentDialog({
 // Standalone attachment list — renders attachments not already in the markdown
 // ---------------------------------------------------------------------------
 
-function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
+function AttachmentRow({ attachment }: { attachment: Attachment }) {
+  const { t } = useT("editor");
   const download = useDownloadAttachment();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewable = getRendererKey(attachment.filename) !== "unsupported";
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
+      <FileText className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm">{attachment.filename}</p>
+      </div>
+      {previewable && (
+        <button
+          type="button"
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          title={t(($) => $.file_card.preview)}
+          onClick={() => setPreviewOpen(true)}
+        >
+          <Eye className="size-3.5" />
+        </button>
+      )}
+      <button
+        type="button"
+        className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        onClick={() => download(attachment.id)}
+      >
+        <Download className="size-3.5" />
+      </button>
+      {previewOpen && (
+        <FilePreviewModal
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          url={attachment.url}
+          filename={attachment.filename}
+          sizeBytes={attachment.size_bytes}
+          attachmentId={attachment.id}
+        />
+      )}
+    </div>
+  );
+}
+
+function AttachmentList({ attachments, content, className }: { attachments?: Attachment[]; content?: string; className?: string }) {
   if (!attachments?.length) return null;
   // Skip attachments whose URL is already referenced in the markdown content,
   // and duplicates of the same file (same name/type/size) that are referenced.
@@ -148,22 +191,7 @@ function AttachmentList({ attachments, content, className }: { attachments?: Att
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       {standalone.map((a) => (
-        <div
-          key={a.id}
-          className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
-        >
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm">{a.filename}</p>
-          </div>
-          <button
-            type="button"
-            className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-            onClick={() => download(a.id)}
-          >
-            <Download className="size-3.5" />
-          </button>
-        </div>
+        <AttachmentRow key={a.id} attachment={a} />
       ))}
     </div>
   );

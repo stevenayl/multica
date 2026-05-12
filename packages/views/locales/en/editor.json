@@ -61,6 +61,7 @@
     "load_failed": "Failed to load file",
     "truncated": "file truncated for preview",
     "unsupported": "No preview available for {{filename}}",
+    "too_large": "{{filename}} is too large to preview — please download",
     "download": "Download",
     "preview": "Preview"
   },

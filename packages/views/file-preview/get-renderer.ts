@@ -55,3 +55,20 @@ export function getRendererKey(filename: string): RendererKey {
   const ext = filename.slice(dot + 1).toLowerCase();
   return EXT_MAP[ext] ?? "unsupported";
 }
+
+// Per-kind preview size cap. Anything above this falls back to a download
+// prompt so we don't lock up the main thread parsing a 50 MB log or 100 MB
+// xlsx in-browser. Renderers that stream via the browser (image / video /
+// audio / pdf via iframe) are not capped here — the browser handles them.
+const SIZE_CAPS: Partial<Record<RendererKey, number>> = {
+  text: 5 * 1024 * 1024,
+  html: 5 * 1024 * 1024,
+  markdown: 5 * 1024 * 1024,
+  csv: 20 * 1024 * 1024,
+  xlsx: 20 * 1024 * 1024,
+  docx: 20 * 1024 * 1024,
+};
+
+export function getPreviewSizeCap(kind: RendererKey): number | undefined {
+  return SIZE_CAPS[kind];
+}

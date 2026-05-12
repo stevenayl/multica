@@ -61,6 +61,7 @@
     "load_failed": "无法加载文件",
     "truncated": "文件过大，已截断预览",
     "unsupported": "{{filename}} 暂不支持预览",
+    "too_large": "{{filename}} 文件过大，请下载后查看",
     "download": "下载",
     "preview": "预览"
   },
