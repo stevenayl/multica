@@ -70,6 +70,7 @@
     "toast_failed": "创建 Squad 失败"
   },
   "create_project": {
+    "title": "新建项目",
     "title_breadcrumb": "新建项目",
     "icon_tooltip": "选择图标",
     "title_placeholder": "项目标题",

@@ -550,6 +550,19 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	h.publish(protocol.EventActivityCreated, uuidToString(issue.WorkspaceID), "agent", actorID, map[string]any{
+		"issue_id": uuidToString(issue.ID),
+		"entry": map[string]any{
+			"type":       "activity",
+			"id":         uuidToString(activity.ID),
+			"actor_type": "agent",
+			"actor_id":   actorID,
+			"action":     activity.Action,
+			"details":    json.RawMessage(details),
+			"created_at": timestampToString(activity.CreatedAt),
+		},
+	})
+
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"id":         uuidToString(activity.ID),
 		"action":     activity.Action,
