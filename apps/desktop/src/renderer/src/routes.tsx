@@ -20,7 +20,6 @@ import { DashboardPage } from "@multica/views/dashboard";
 import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
-import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { ComputersPage } from "@multica/views/computers";
 import { AgentsPage } from "@multica/views/agents";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
@@ -142,9 +141,13 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Computer" },
           },
           {
+            // RFC v6.1 / §1.3: legacy /:slug/runtimes is preserved only as
+            // a redirect to /:slug/computers. Existing tabs / pins keep
+            // resolving; the index page is gone. Detail (/runtimes/:id)
+            // remains mounted because a runtime id is not a computer id.
             path: "runtimes",
-            element: <DesktopRuntimesPage />,
-            handle: { title: "Runtimes" },
+            element: <Navigate to="../computers" replace />,
+            handle: { title: "Computers" },
           },
           {
             path: "runtimes/:id",

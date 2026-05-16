@@ -67,6 +67,23 @@ const nextConfig: NextConfig = {
       fallback: [],
     };
   },
+  // RFC v6.1 / §1.3: /runtimes is the legacy index URL — Computers is the
+  // canonical surface now. Old pins / tabs / external links continue to
+  // resolve via a permanent (301) redirect. We deliberately do NOT remap
+  // /:slug/runtimes/:id → /:slug/computers/:id: a runtime's id is not its
+  // daemon's id (computer_id == daemon_id, per RFC §6.2 / D1), so the
+  // path-segment swap would route to a non-existent computer. The legacy
+  // runtime detail page stays mounted; Computer detail links into it for
+  // the Agent runtimes tab.
+  async redirects() {
+    return [
+      {
+        source: "/:workspaceSlug/runtimes",
+        destination: "/:workspaceSlug/computers",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
