@@ -97,24 +97,24 @@ export function buildMenuTemplate(
   ];
 }
 
+export interface TrayOptions {
+  // Peek at the current main window without forcing a recreation. Used by
+  // the left-click handler to decide whether the window is already visible
+  // (hide) or needs to be brought forward (show-or-create).
+  getWindow: () => BrowserWindow | null;
+  // Single entry point for "bring the main window forward, creating one if
+  // it was previously closed/destroyed". The caller owns BrowserWindow
+  // lifecycle so tray-manager never holds a stale reference.
+  showOrCreateWindow: () => void;
+}
+
 let tray: Tray | null = null;
 let unsubscribe: (() => void) | null = null;
 
-function showWindow(getWindow: () => BrowserWindow | null): void {
-  const win = getWindow();
-  if (!win) return;
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
-}
-
-function rebuildMenu(
-  status: DaemonStatus,
-  getWindow: () => BrowserWindow | null,
-): void {
+function rebuildMenu(status: DaemonStatus, opts: TrayOptions): void {
   if (!tray) return;
   const template = buildMenuTemplate(status, {
-    showWindow: () => showWindow(getWindow),
+    showWindow: opts.showOrCreateWindow,
     openLog: () => {
       void openDaemonLogFile();
     },
@@ -138,7 +138,7 @@ function rebuildMenu(
  * Mount the tray icon and wire it to the live daemon status. Idempotent —
  * a second call is a no-op so HMR / re-entry can't accumulate Tray instances.
  */
-export function setupTray(getWindow: () => BrowserWindow | null): void {
+export function setupTray(opts: TrayOptions): void {
   if (tray) return;
 
   const initialImage = nativeImage.createFromPath(resolveIconPath("stopped"));
@@ -148,7 +148,7 @@ export function setupTray(getWindow: () => BrowserWindow | null): void {
   unsubscribe = subscribeDaemonStatus((status) => {
     if (!tray) return;
     tray.setImage(nativeImage.createFromPath(resolveIconPath(status.state)));
-    rebuildMenu(status, getWindow);
+    rebuildMenu(status, opts);
   });
 
   // Left-click handler is a macOS/Windows nice-to-have only. Linux's
@@ -156,12 +156,17 @@ export function setupTray(getWindow: () => BrowserWindow | null): void {
   // reachable via the context menu — which they are (see buildMenuTemplate).
   if (process.platform !== "linux") {
     tray.on("click", () => {
-      const win = getWindow();
-      if (!win) return;
+      const win = opts.getWindow();
+      // The window may have been closed (mainWindow === null after the
+      // owner's `closed` handler) or destroyed; in either case recreate.
+      if (!win || win.isDestroyed()) {
+        opts.showOrCreateWindow();
+        return;
+      }
       if (win.isVisible() && !win.isMinimized()) {
         win.hide();
       } else {
-        showWindow(getWindow);
+        opts.showOrCreateWindow();
       }
     });
   }

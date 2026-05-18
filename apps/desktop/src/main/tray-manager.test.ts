@@ -200,14 +200,61 @@ describe("buildMenuTemplate", () => {
 
 describe("setupTray", () => {
   it("creates a Tray once and ignores duplicate setupTray calls", () => {
-    setupTray(() => null);
-    setupTray(() => null);
+    setupTray({ getWindow: () => null, showOrCreateWindow: vi.fn() });
+    setupTray({ getWindow: () => null, showOrCreateWindow: vi.fn() });
     expect(h.trayInstances).toHaveLength(1);
+  });
+
+  it("Show Multica menu item invokes showOrCreateWindow", () => {
+    const showOrCreateWindow = vi.fn();
+    setupTray({ getWindow: () => null, showOrCreateWindow });
+    const menu = getLastMenu();
+    const item = menu.find((i) => i.label === "Show Multica");
+    (item?.click as () => void)?.();
+    expect(showOrCreateWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it("tray click on darwin recreates the window when getWindow returns null", () => {
+    const orig = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    try {
+      const showOrCreateWindow = vi.fn();
+      setupTray({ getWindow: () => null, showOrCreateWindow });
+      const click = h.trayInstances[0]!.clickListeners[0]!;
+      click();
+      expect(showOrCreateWindow).toHaveBeenCalledTimes(1);
+    } finally {
+      if (orig) Object.defineProperty(process, "platform", orig);
+    }
+  });
+
+  it("tray click on darwin treats a destroyed BrowserWindow as missing", () => {
+    const orig = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    try {
+      const showOrCreateWindow = vi.fn();
+      const destroyedWindow = {
+        isDestroyed: () => true,
+        isVisible: () => true,
+        isMinimized: () => false,
+        hide: vi.fn(),
+        show: vi.fn(),
+        focus: vi.fn(),
+        restore: vi.fn(),
+      } as unknown as Electron.BrowserWindow;
+      setupTray({ getWindow: () => destroyedWindow, showOrCreateWindow });
+      const click = h.trayInstances[0]!.clickListeners[0]!;
+      click();
+      expect(showOrCreateWindow).toHaveBeenCalledTimes(1);
+      expect(destroyedWindow.hide).not.toHaveBeenCalled();
+    } finally {
+      if (orig) Object.defineProperty(process, "platform", orig);
+    }
   });
 
   it("replays current status on subscribe and renders an initial menu", () => {
     h.lastEmit.value = { state: "running", pid: 99, agents: ["a"] };
-    setupTray(() => null);
+    setupTray({ getWindow: () => null, showOrCreateWindow: vi.fn() });
     const menu = getLastMenu();
     expect(menu[0]).toMatchObject({
       label: "Running · pid 99 · 1 agent",
@@ -216,7 +263,7 @@ describe("setupTray", () => {
   });
 
   it("swaps the tray image and rebuilds the menu on status change", () => {
-    setupTray(() => null);
+    setupTray({ getWindow: () => null, showOrCreateWindow: vi.fn() });
     const tray = h.trayInstances[0]!;
     tray.setImageMock.mockClear();
     (Menu.buildFromTemplate as unknown as { mock: { calls: unknown[][] } }).mock.calls.length = 0;
@@ -231,7 +278,7 @@ describe("setupTray", () => {
   });
 
   it("maps installing_cli and stopping to the starting silhouette", () => {
-    setupTray(() => null);
+    setupTray({ getWindow: () => null, showOrCreateWindow: vi.fn() });
     const tray = h.trayInstances[0]!;
 
     emit({ state: "installing_cli" });
@@ -244,14 +291,14 @@ describe("setupTray", () => {
   });
 
   it("maps cli_not_found to the error silhouette", () => {
-    setupTray(() => null);
+    setupTray({ getWindow: () => null, showOrCreateWindow: vi.fn() });
     emit({ state: "cli_not_found" });
     expect(lastImagePath()).toMatch(/tray-error(-Template)?\.png$/);
   });
 
   it("wires menu clicks to daemonOps and openDaemonLogFile", () => {
     h.lastEmit.value = { state: "running", pid: 1 };
-    setupTray(() => null);
+    setupTray({ getWindow: () => null, showOrCreateWindow: vi.fn() });
     const menu = getLastMenu();
     const click = (label: string): void => {
       const item = menu.find((i) => i.label === label);
@@ -273,7 +320,7 @@ describe("setupTray", () => {
     const orig = Object.getOwnPropertyDescriptor(process, "platform");
     Object.defineProperty(process, "platform", { value: "linux" });
     try {
-      setupTray(() => null);
+      setupTray({ getWindow: () => null, showOrCreateWindow: vi.fn() });
       expect(h.trayInstances[0]!.clickListeners).toHaveLength(0);
     } finally {
       if (orig) Object.defineProperty(process, "platform", orig);
@@ -284,7 +331,7 @@ describe("setupTray", () => {
     const orig = Object.getOwnPropertyDescriptor(process, "platform");
     Object.defineProperty(process, "platform", { value: "darwin" });
     try {
-      setupTray(() => null);
+      setupTray({ getWindow: () => null, showOrCreateWindow: vi.fn() });
       expect(h.trayInstances[0]!.clickListeners).toHaveLength(1);
     } finally {
       if (orig) Object.defineProperty(process, "platform", orig);
