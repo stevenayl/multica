@@ -48,12 +48,12 @@ func TestBuildSearchQuery_MultiTerm(t *testing.T) {
 	if args[0] != "foo bar" {
 		t.Errorf("expected phrase arg lowercased, got %q", args[0])
 	}
-	// args[1] is workspace_id placeholder; term args start at args[2].
-	if args[2] != "foo" {
-		t.Errorf("expected first term arg lowercased, got %q", args[2])
+	// args[0]=exact, args[1]=%phrase%, args[2]=phrase%, args[3]=workspace_id placeholder; term args start at args[4].
+	if args[4] != "%foo%" {
+		t.Errorf("expected first term arg as contains pattern, got %q", args[4])
 	}
-	if args[3] != "bar" {
-		t.Errorf("expected second term arg lowercased, got %q", args[3])
+	if args[5] != "%bar%" {
+		t.Errorf("expected second term arg as contains pattern, got %q", args[5])
 	}
 
 	// Multi-word query should have AND conditions.
