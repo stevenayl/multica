@@ -782,6 +782,16 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "assignee must be a valid squad in this workspace")
 			return false
 		}
+		// Archived squads must be rejected at save time: the dispatcher will
+		// otherwise produce an unbroken stream of skipped runs against a
+		// squad that can never be revived without an explicit un-archive.
+		// Pair with TransferSquadAutopilotsToLeader on DeleteSquad so any
+		// autopilot that survives the archive flips to assignee_type='agent'
+		// (the leader) and stops referencing the dead squad row.
+		if squad.ArchivedAt.Valid {
+			writeError(w, http.StatusUnprocessableEntity, "squad is archived; pick a different squad")
+			return false
+		}
 		leader, err := h.Queries.GetAgent(r.Context(), squad.LeaderID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "squad leader agent not found")

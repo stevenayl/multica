@@ -1,8 +1,11 @@
 package service
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -53,5 +56,41 @@ func TestFormatAdmissionReason(t *testing.T) {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// errDispatchSkipped must be distinguishable via errors.As from a wrapped
+// fmt.Errorf, otherwise DispatchAutopilot's failure-vs-skip switch will treat
+// it as a generic failure and the manual-trigger handler will 500. Locks in
+// the contract that fixed the post-admission race (PR #2888 review fix #2).
+func TestErrDispatchSkippedUnwraps(t *testing.T) {
+	base := &errDispatchSkipped{reason: "squad leader agent is archived"}
+	wrapped := fmt.Errorf("dispatch run_only: %w", base)
+
+	var got *errDispatchSkipped
+	if !errors.As(wrapped, &got) {
+		t.Fatalf("errors.As did not match errDispatchSkipped through fmt.Errorf wrap")
+	}
+	if got.reason != base.reason {
+		t.Fatalf("reason mismatch: got %q want %q", got.reason, base.reason)
+	}
+
+	// pgx.ErrNoRows must NOT pass through the same gate — otherwise transient
+	// "row not found" errors that should fail-open via shouldSkipDispatch
+	// would be swallowed silently as skips at the dispatch level.
+	if errors.As(pgx.ErrNoRows, &got) {
+		t.Fatal("pgx.ErrNoRows wrongly satisfied errDispatchSkipped")
+	}
+}
+
+func TestResolveAutopilotLeaderSentinels(t *testing.T) {
+	// Sanity-check the sentinel exported via errors.Is so callers can branch
+	// on "archived" without string-matching the failure reason.
+	if !errors.Is(errSquadArchived, errSquadArchived) {
+		t.Fatal("errSquadArchived must satisfy errors.Is itself")
+	}
+	wrapped := fmt.Errorf("wrap: %w", errSquadArchived)
+	if !errors.Is(wrapped, errSquadArchived) {
+		t.Fatal("errSquadArchived must unwrap through fmt.Errorf")
 	}
 }
