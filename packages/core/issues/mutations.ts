@@ -25,6 +25,7 @@ import {
   pruneDeletedIssueFromParentChildrenCaches,
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
+import { inboxKeys } from "../inbox/queries";
 import { useRecentIssuesStore } from "./stores";
 import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
@@ -327,6 +328,20 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      // Inbox rows carry a server-computed `assignee_scope` derived from
+      // the issue's assignee. Re-assigning the issue (member ↔ agent ↔
+      // squad ↔ none) shifts the row's chip bucket and the scope-count
+      // badge, so flush both whenever this mutation touched assignment.
+      // The WS handler also invalidates on the broadcast issue:updated;
+      // doing it here too lets the originating tab refresh without
+      // round-tripping through the server.
+      if (
+        Object.prototype.hasOwnProperty.call(vars, "assignee_id") ||
+        Object.prototype.hasOwnProperty.call(vars, "assignee_type")
+      ) {
+        qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+        qc.invalidateQueries({ queryKey: inboxKeys.scopeCounts(wsId) });
+      }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this
@@ -465,10 +480,19 @@ export function useBatchUpdateIssues() {
         }
       }
     },
-    onSettled: (_data, _err, _vars, ctx) => {
+    onSettled: (_data, _err, vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+      // Bulk reassignments shift `assignee_scope` across N rows — same
+      // reasoning as useUpdateIssue.
+      if (
+        Object.prototype.hasOwnProperty.call(vars.updates, "assignee_id") ||
+        Object.prototype.hasOwnProperty.call(vars.updates, "assignee_type")
+      ) {
+        qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+        qc.invalidateQueries({ queryKey: inboxKeys.scopeCounts(wsId) });
+      }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {
           qc.invalidateQueries({

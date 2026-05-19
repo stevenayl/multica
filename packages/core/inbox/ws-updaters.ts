@@ -40,7 +40,9 @@ export function onInboxIssueStatusChanged(
 
 // Mirrors the DB-level ON DELETE CASCADE on inbox_item.issue_id: when an issue
 // is deleted, all inbox items that referenced it are gone server-side, so drop
-// them from the cache too.
+// them from the cache too. Scope counts shift in lockstep with the pruned
+// rows, so invalidate them here as well — otherwise the chip badge keeps
+// counting an issue that no longer exists.
 export function onInboxIssueDeleted(
   qc: QueryClient,
   wsId: string,
@@ -49,8 +51,14 @@ export function onInboxIssueDeleted(
   qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
     old?.filter((i) => i.issue_id !== issueId),
   );
+  qc.invalidateQueries({ queryKey: inboxKeys.scopeCounts(wsId) });
 }
 
+// Generic single-item inbox invalidation (e.g. `inbox:archived`,
+// `inbox:read`). The chip badge is derived from the same rows that just
+// changed, so it has to be re-fetched alongside the list — otherwise the
+// badge stays at the pre-change value until a hard refresh.
 export function onInboxInvalidate(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+  qc.invalidateQueries({ queryKey: inboxKeys.scopeCounts(wsId) });
 }

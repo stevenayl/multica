@@ -10,7 +10,6 @@ import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
   deduplicateInboxItems,
-  useInboxUnreadCount,
   filterInboxByScope,
 } from "@multica/core/inbox/queries";
 import {
@@ -128,7 +127,15 @@ export function InboxPage() {
   });
 
   const isMobile = useIsMobile();
-  const unreadCount = useInboxUnreadCount(wsId);
+  // Header unread count tracks the *currently visible* list, not the
+  // workspace-wide total. Subset filtering and the empty-mode (0 chips)
+  // case would otherwise show a number that doesn't match the rows below.
+  // Sidebar / desktop badge consumers keep using `useInboxUnreadCount` for
+  // the global figure.
+  const unreadCount = useMemo(
+    () => items.filter((i) => !i.read).length,
+    [items],
+  );
 
   const markReadMutation = useMarkInboxRead();
   const archiveMutation = useArchiveInbox();

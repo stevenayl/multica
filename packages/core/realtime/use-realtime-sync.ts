@@ -217,11 +217,22 @@ export function useRealtimeSync(
           // the per-squad members-status cache. Prefix-matches both the
           // squad list and every squadMemberStatus query.
           qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+          // Creating/deleting the user's first owned agent flips
+          // `has_my_agent`, which gates the "my agent" chip's
+          // disabled-but-selected state. Refresh the resource-availability
+          // probe so the chip un-greys (or greys) on the first relationship
+          // change instead of waiting for reload.
+          qc.invalidateQueries({ queryKey: inboxKeys.resourceAvailability(wsId) });
         }
       },
       member: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+          // Member adds/removes can flip `has_my_squad` (user joining or
+          // leaving a squad as a human member). Mirror the agent handler.
+          qc.invalidateQueries({ queryKey: inboxKeys.resourceAvailability(wsId) });
+        }
       },
       // workspace:updated is handled by the specific handler below
       // (compares prefixes to decide whether to also invalidate issues).
@@ -245,6 +256,10 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
           // squad:deleted triggers assignee transfer — refresh issues too.
           qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+          // Creating/deleting a squad the user is involved in flips
+          // `has_my_squad`. Refresh resource-availability so the
+          // "my squad" chip's disabled state reacts in realtime.
+          qc.invalidateQueries({ queryKey: inboxKeys.resourceAvailability(wsId) });
         }
       },
       label: () => {
@@ -386,6 +401,13 @@ export function useRealtimeSync(
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);
         }
+        // The inbox row's `assignee_scope` is derived from the issue's
+        // assignee, so any issue:updated event may have shifted it (the
+        // payload doesn't tell us which fields changed). Invalidate the
+        // inbox list and scope counts so chip filtering, chip badges, and
+        // scope-targeted bulk actions reflect the new scope without
+        // requiring a full reload.
+        onInboxInvalidate(qc, wsId);
       }
     });
 
