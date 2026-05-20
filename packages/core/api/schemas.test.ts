@@ -43,7 +43,7 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
       issues: [
         {
           ...baseIssue,
-          metadata: { pipeline_status: "waiting", attempts: 3, is_blocked: true },
+          metadata: { pipeline_status: "waiting", pr_number: 3, is_blocked: true },
         },
       ],
       total: 1,
@@ -51,7 +51,7 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.metadata).toEqual({
       pipeline_status: "waiting",
-      attempts: 3,
+      pr_number: 3,
       is_blocked: true,
     });
   });

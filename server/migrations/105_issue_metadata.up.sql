@@ -1,5 +1,5 @@
 -- Per-issue custom metadata: a small JSONB KV map agents use to record
--- pipeline state (attempts, PR number, pipeline_status, …) that doesn't
+-- pipeline state (PR number, pipeline_status, waiting_on, …) that doesn't
 -- fit cleanly into the structured issue fields.
 --
 -- Application-level validation (handler) enforces key regex, key count

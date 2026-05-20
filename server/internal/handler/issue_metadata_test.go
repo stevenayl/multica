@@ -19,7 +19,6 @@ func TestIssueMetadataSetGetDelete(t *testing.T) {
 		value string // raw JSON value
 	}{
 		{"pipeline_status", `"waiting"`},
-		{"attempts", `3`},
 		{"pr_number", `482`},
 		{"is_blocked", `true`},
 		{"is_done", `false`},
@@ -52,8 +51,8 @@ func TestIssueMetadataSetGetDelete(t *testing.T) {
 	if got := resp.Metadata["pipeline_status"]; got != "waiting" {
 		t.Errorf("pipeline_status: expected \"waiting\", got %T %v", got, got)
 	}
-	if got := resp.Metadata["attempts"]; got != float64(3) {
-		t.Errorf("attempts: expected number 3, got %T %v", got, got)
+	if got := resp.Metadata["pr_number"]; got != float64(482) {
+		t.Errorf("pr_number: expected number 482, got %T %v", got, got)
 	}
 	if got := resp.Metadata["is_blocked"]; got != true {
 		t.Errorf("is_blocked: expected true, got %T %v", got, got)
@@ -83,7 +82,7 @@ func TestIssueMetadataSetGetDelete(t *testing.T) {
 	if _, present := afterDelete.Metadata["pipeline_status"]; present {
 		t.Errorf("after delete, pipeline_status should be gone; got %+v", afterDelete.Metadata)
 	}
-	if _, present := afterDelete.Metadata["attempts"]; !present {
+	if _, present := afterDelete.Metadata["pr_number"]; !present {
 		t.Errorf("delete removed unrelated key; got %+v", afterDelete.Metadata)
 	}
 }

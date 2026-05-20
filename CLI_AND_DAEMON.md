@@ -334,7 +334,7 @@ Use `--metadata key=value` (repeatable; combined with AND) to filter by per-issu
 
 ```bash
 multica issue list --metadata pipeline_status=waiting_review
-multica issue list --metadata attempts=3 --metadata is_blocked=true
+multica issue list --metadata pr_number=482 --metadata is_blocked=true
 ```
 
 ### Get Issue
@@ -453,7 +453,9 @@ cursor target falls before the watermark.
 
 ### Metadata
 
-Per-issue metadata is a small KV map agents use to track pipeline state (attempts, PR number, pipeline status, ...). Keys match `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$`, values are primitives (string / number / bool), max 50 keys per issue, blob capped at 8KB.
+Per-issue metadata is a small KV map agents use to track pipeline state (PR number, pipeline status, waiting_on, ...). Keys match `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$`, values are primitives (string / number / bool), max 50 keys per issue, blob capped at 8KB.
+
+Don't pin runtime bookkeeping like `attempts`, large logs, secrets/tokens, or description/comment copies — see the agent runtime prompt for the full anti-pattern list.
 
 ```bash
 # List every key on an issue
@@ -464,7 +466,7 @@ multica issue metadata get <issue-id> --key pipeline_status
 
 # Write a single key — value auto-typed (true/false → bool, numbers → number, else string)
 multica issue metadata set <issue-id> --key pipeline_status --value waiting_review
-multica issue metadata set <issue-id> --key attempts --value 3
+multica issue metadata set <issue-id> --key pr_number --value 482
 multica issue metadata set <issue-id> --key is_blocked --value true
 
 # Force a specific type when sniffing would pick the wrong one

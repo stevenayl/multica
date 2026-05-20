@@ -16,7 +16,7 @@ import (
 )
 
 // Per-issue metadata is a small JSONB KV map agents use to record pipeline
-// state (attempts, PR number, pipeline_status, ...). Three rules govern
+// state (PR number, pipeline_status, waiting_on, ...). Three rules govern
 // the V1 surface — they're enforced both in the handler and at the DB:
 //
 //   - keys match `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$` (handler)

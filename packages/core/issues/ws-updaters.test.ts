@@ -189,23 +189,23 @@ describe("onIssueMetadataChanged", () => {
   it("replaces metadata in both detail and list caches (no merge)", () => {
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), {
       ...baseIssue,
-      metadata: { attempts: 1, stale: "yes" },
+      metadata: { pr_number: 1, stale: "yes" },
     });
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: {
         todo: {
-          issues: [{ ...baseIssue, metadata: { attempts: 1 } }],
+          issues: [{ ...baseIssue, metadata: { pr_number: 1 } }],
           total: 1,
         },
       },
     });
 
-    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { attempts: 2 });
+    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { pr_number: 2 });
 
     const detail = qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID));
-    expect(detail?.metadata).toEqual({ attempts: 2 });
+    expect(detail?.metadata).toEqual({ pr_number: 2 });
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
-    expect(list?.byStatus.todo?.issues[0]?.metadata).toEqual({ attempts: 2 });
+    expect(list?.byStatus.todo?.issues[0]?.metadata).toEqual({ pr_number: 2 });
   });
 
   it("leaves untouched caches as undefined (no spurious writes)", () => {

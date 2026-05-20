@@ -24,7 +24,7 @@ export interface IssueReaction {
 
 /**
  * Per-issue metadata is a flat KV map agents use to record pipeline state
- * (attempts, PR number, pipeline_status, ...). Values are primitives only —
+ * (PR number, pipeline_status, waiting_on, ...). Values are primitives only —
  * string / number / bool — enforced by both the API and the DB. Always
  * present in responses (empty object when unset) so reads don't need a
  * nil guard on the parent field.
