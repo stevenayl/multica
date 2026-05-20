@@ -1,4 +1,4 @@
-import { Fragment, useEffect } from "react";
+import { Fragment } from "react";
 import {
   Inbox,
   CircleUser,
@@ -36,7 +36,6 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuShortcut,
   ContextMenuTrigger,
 } from "@multica/ui/components/ui/context-menu";
 import { cn } from "@multica/ui/lib/utils";
@@ -44,7 +43,6 @@ import {
   useTabStore,
   useActiveGroup,
   resolveRouteIcon,
-  getActiveTab,
   type Tab,
 } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
@@ -69,7 +67,7 @@ function SortableTabItem({
   /**
    * True iff this is the only tab in the workspace. Hiding X on the last
    * tab matches existing behavior and avoids the surprise of the store's
-   * last-tab reseed kicking in. Pinned tabs always hide X (D3c).
+   * last-tab reseed kicking in. Pinned tabs always hide X (RFC §3 D3c).
    */
   isOnly: boolean;
 }) {
@@ -105,18 +103,20 @@ function SortableTabItem({
     closeTab(tab.id);
   };
 
-  const stopDragOnClose = (e: React.PointerEvent) => {
+  const handleTogglePin = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    togglePin(tab.id);
+  };
+
+  const stopDragOnAction = (e: React.PointerEvent) => {
     e.stopPropagation();
   };
 
-  // Pinned tabs:
-  //   - icon-only (no title, no X) — Chrome style, RFC §3 D1v-i FINAL.
-  //   - narrow fixed width so they collapse to ~icon + padding.
-  //   - accent left border so they read as a distinct group even when the
-  //     bar is crowded and the inter-zone gap (rendered by TabBar) gets
-  //     hidden by horizontal scroll.
+  // Pinned tabs keep their full title (RFC §3 D1v-ii FINAL). The only weak
+  // visual differences vs. unpinned tabs are the accent left border and the
+  // suppressed X (closing requires explicit Unpin). Pin/Unpin is reachable
+  // via the hover action button below and the right-click menu fallback.
   const showCloseButton = !tab.pinned && !isOnly;
-  const showTitle = !tab.pinned;
 
   const tabButton = (
     <button
@@ -128,9 +128,8 @@ function SortableTabItem({
       aria-label={tab.pinned ? `${tab.title} (pinned)` : tab.title}
       title={tab.pinned ? `${tab.title} (pinned)` : undefined}
       className={cn(
-        "group flex h-7 items-center gap-1.5 rounded-md text-xs transition-colors",
+        "group flex h-7 w-40 items-center gap-1.5 rounded-md px-2 text-xs transition-colors",
         "select-none cursor-default",
-        tab.pinned ? "w-8 justify-center px-1.5" : "w-40 px-2",
         isActive
           ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
           : "bg-sidebar-accent/50 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
@@ -139,21 +138,31 @@ function SortableTabItem({
       )}
     >
       {Icon && <Icon className="size-3.5 shrink-0" />}
-      {showTitle && (
-        <span
-          className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left"
-          style={{
-            maskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
-            WebkitMaskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
-          }}
-        >
-          {tab.title}
-        </span>
-      )}
+      <span
+        className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left"
+        style={{
+          maskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
+          WebkitMaskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
+        }}
+      >
+        {tab.title}
+      </span>
+      <span
+        onClick={handleTogglePin}
+        onPointerDown={stopDragOnAction}
+        role="button"
+        aria-label={tab.pinned ? "Unpin tab" : "Pin tab"}
+        title={tab.pinned ? "Unpin tab" : "Pin tab"}
+        className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
+      >
+        {tab.pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
+      </span>
       {showCloseButton && (
         <span
           onClick={handleClose}
-          onPointerDown={stopDragOnClose}
+          onPointerDown={stopDragOnAction}
+          role="button"
+          aria-label="Close tab"
           className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
         >
           <X className="size-2.5" />
@@ -178,7 +187,6 @@ function SortableTabItem({
               Pin tab
             </>
           )}
-          <ContextMenuShortcut>⌘⇧P</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
@@ -219,33 +227,9 @@ function NewTabButton() {
   );
 }
 
-/**
- * Listens for Cmd/Ctrl+Shift+P at the window level and toggles pin on the
- * active tab. Mounted once by TabBar so it stays alive for the entire
- * lifetime of the dashboard shell; unmounting on workspace switch would
- * miss keypresses during the transition.
- */
-function usePinShortcut() {
-  const togglePin = useTabStore((s) => s.togglePin);
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!e.shiftKey) return;
-      if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key !== "P" && e.key !== "p") return;
-      const active = getActiveTab(useTabStore.getState());
-      if (!active) return;
-      e.preventDefault();
-      togglePin(active.id);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [togglePin]);
-}
-
 export function TabBar() {
   const group = useActiveGroup();
   const moveTab = useTabStore((s) => s.moveTab);
-  usePinShortcut();
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
