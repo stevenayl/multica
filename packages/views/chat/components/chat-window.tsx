@@ -442,11 +442,10 @@ export function ChatWindow() {
 
   const isVisible = isOpen && (isExpanded || boundsReady);
 
-  const containerClass = isExpanded
-    ? "absolute inset-3 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden"
-    : "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
+  const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
   const containerStyle: React.CSSProperties = {
-    ...(!isExpanded ? { width: renderWidth, height: renderHeight } : {}),
+    width: renderWidth,
+    height: renderHeight,
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
   };
@@ -470,7 +469,7 @@ export function ChatWindow() {
         scale: { type: "spring", duration: 0.2, bounce: 0 },
       }}
     >
-      {!isExpanded && <ChatResizeHandles onDragStart={startDrag} />}
+      <ChatResizeHandles onDragStart={startDrag} />
       {/* Header — ⊕ new + session dropdown | window tools */}
       <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
         <div className="flex items-center gap-1 min-w-0">
