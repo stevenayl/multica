@@ -550,14 +550,14 @@ func codexFirstTurnNoProgressTimeout(semanticInactivityTimeout time.Duration) ti
 }
 
 func isCodexFirstTurnProgressActivity(activity string) bool {
-	return strings.HasPrefix(activity, "item/") || activity == "error:terminal" || activity == "turn:completed"
+	return activity != "" && activity != "status:running" && activity != "error:retry"
 }
 
 func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail string) string {
 	var msg string
 	switch diag.Kind {
 	case codexTimeoutFirstTurnNoProgress:
-		msg = fmt.Sprintf("%s after %s: received turn start but no item, turn/completed, or error event (%s)",
+		msg = fmt.Sprintf("%s after %s: received turn start but no item, message, tool, turn/completed, or error event (%s)",
 			CodexFirstTurnNoProgressMarker,
 			diag.Timeout,
 			formatCodexDiagnosticFields(diag),

@@ -514,7 +514,10 @@ func TestCodexFirstTurnProgressActivity(t *testing.T) {
 		{activity: "", want: false},
 		{activity: "status:running", want: false},
 		{activity: "error:retry", want: false},
-		{activity: "error", want: false},
+		{activity: "error", want: true},
+		{activity: "text", want: true},
+		{activity: "tool-use:exec_command", want: true},
+		{activity: "tool-result:exec_command", want: true},
 		{activity: "item/started:commandExecution:cmd-1", want: true},
 		{activity: "item/completed:agentMessage:msg-1", want: true},
 		{activity: "error:terminal", want: true},
@@ -1231,6 +1234,38 @@ func TestCodexExecuteFirstTurnRetryErrorDoesNotSatisfyProgress(t *testing.T) {
 	}
 	if strings.Contains(result.Error, CodexSemanticInactivityMarker) {
 		t.Fatalf("retrying error should not demote first-turn timeout to semantic inactivity, got %q", result.Error)
+	}
+}
+
+func TestCodexExecuteLegacyFirstTurnMessageSatisfiesProgress(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-legacy"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_started"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"legacy alive"}}}'`+"\n"+
+		`sleep 0.07`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_complete"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "legacy alive" {
+		t.Fatalf("expected legacy output, got %q", result.Output)
 	}
 }
 
