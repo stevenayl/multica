@@ -4,7 +4,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import {
   createMarkdownPasteExtension,
-  escapeNonStandardHtmlTags,
+  escapeRawHtmlTagsOutsideCode,
 } from "./markdown-paste";
 
 interface FakeClipboard {
@@ -226,6 +226,38 @@ describe("markdownPaste — code block context", () => {
     expect(editorText).toContain("做转");
   });
 
+  it("preserves HTML-like tags embedded in regular text", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+
+    const text = "foo <bar> baz";
+    const handled = paste(editor, text);
+    expect(handled).toBe(true);
+    expect(editor.getText()).toBe(text);
+    expect(editor.getMarkdown()).toBe("foo &lt;bar&gt; baz");
+  });
+
+  it("preserves standard HTML element names as literal pasted text", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+
+    const text = 'foo <button> <img src="x"> baz';
+    const handled = paste(editor, text);
+    expect(handled).toBe(true);
+    expect(editor.getText()).toBe(text);
+    expect(editor.getMarkdown()).toBe(
+      'foo &lt;button&gt; &lt;img src="x"&gt; baz',
+    );
+  });
+
   it("does not parse oversized bracketed plain text as JSON", () => {
     editor = makeEditor({
       type: "doc",
@@ -241,54 +273,61 @@ describe("markdownPaste — code block context", () => {
   });
 });
 
-describe("escapeNonStandardHtmlTags", () => {
-  it("escapes unknown tags", () => {
-    expect(escapeNonStandardHtmlTags("<T>")).toBe("&lt;T&gt;");
-    expect(escapeNonStandardHtmlTags("<tag>")).toBe("&lt;tag&gt;");
-    expect(escapeNonStandardHtmlTags("<MyComponent>")).toBe(
+describe("escapeRawHtmlTagsOutsideCode", () => {
+  it("escapes HTML-like tags", () => {
+    expect(escapeRawHtmlTagsOutsideCode("<T>")).toBe("&lt;T&gt;");
+    expect(escapeRawHtmlTagsOutsideCode("<tag>")).toBe("&lt;tag&gt;");
+    expect(escapeRawHtmlTagsOutsideCode("<MyComponent>")).toBe(
       "&lt;MyComponent&gt;",
     );
-    expect(escapeNonStandardHtmlTags("</tag>")).toBe("&lt;/tag&gt;");
+    expect(escapeRawHtmlTagsOutsideCode("</tag>")).toBe("&lt;/tag&gt;");
   });
 
-  it("preserves standard HTML tags", () => {
-    expect(escapeNonStandardHtmlTags("<div>")).toBe("<div>");
-    expect(escapeNonStandardHtmlTags("<br>")).toBe("<br>");
-    expect(escapeNonStandardHtmlTags("</div>")).toBe("</div>");
-    expect(escapeNonStandardHtmlTags('<img src="x">')).toBe('<img src="x">');
+  it("escapes standard HTML element names too", () => {
+    expect(escapeRawHtmlTagsOutsideCode("<div>")).toBe("&lt;div&gt;");
+    expect(escapeRawHtmlTagsOutsideCode("<br>")).toBe("&lt;br&gt;");
+    expect(escapeRawHtmlTagsOutsideCode("</div>")).toBe("&lt;/div&gt;");
+    expect(escapeRawHtmlTagsOutsideCode('<img src="x">')).toBe(
+      '&lt;img src="x"&gt;',
+    );
   });
 
   it("does not escape inside inline code spans", () => {
-    expect(escapeNonStandardHtmlTags("`<tag>`")).toBe("`<tag>`");
-    expect(escapeNonStandardHtmlTags("text `<T>` more")).toBe(
+    expect(escapeRawHtmlTagsOutsideCode("`<tag>`")).toBe("`<tag>`");
+    expect(escapeRawHtmlTagsOutsideCode("text `<T>` more")).toBe(
       "text `<T>` more",
     );
-    expect(escapeNonStandardHtmlTags("``<tag>``")).toBe("``<tag>``");
+    expect(escapeRawHtmlTagsOutsideCode("``<tag>``")).toBe("``<tag>``");
   });
 
   it("does not escape inside fenced code blocks", () => {
-    expect(escapeNonStandardHtmlTags("```\n<T>\n```")).toBe("```\n<T>\n```");
-    expect(escapeNonStandardHtmlTags("~~~\n<tag>\n~~~")).toBe(
+    expect(escapeRawHtmlTagsOutsideCode("```\n<T>\n```")).toBe(
+      "```\n<T>\n```",
+    );
+    expect(escapeRawHtmlTagsOutsideCode("~~~\n<tag>\n~~~")).toBe(
       "~~~\n<tag>\n~~~",
+    );
+    expect(escapeRawHtmlTagsOutsideCode("   ```\n<T>\n   ```")).toBe(
+      "   ```\n<T>\n   ```",
     );
   });
 
-  it("escapes unknown tags while preserving standard tags in mixed content", () => {
-    expect(escapeNonStandardHtmlTags("<T> and <div>")).toBe(
-      "&lt;T&gt; and <div>",
+  it("escapes all tag-like runs in mixed content", () => {
+    expect(escapeRawHtmlTagsOutsideCode("<T> and <div>")).toBe(
+      "&lt;T&gt; and &lt;div&gt;",
     );
   });
 
   it("handles multi-line mixed content", () => {
     const input = "<t>\n\n裸 `<tag>` 做转\n\n<tag>\n\n<t>";
-    const result = escapeNonStandardHtmlTags(input);
+    const result = escapeRawHtmlTagsOutsideCode(input);
     expect(result).toBe(
       "&lt;t&gt;\n\n裸 `<tag>` 做转\n\n&lt;tag&gt;\n\n&lt;t&gt;",
     );
   });
 
   it("does not touch math expressions", () => {
-    expect(escapeNonStandardHtmlTags("1 < 2 > 0")).toBe("1 < 2 > 0");
-    expect(escapeNonStandardHtmlTags("x<y")).toBe("x<y");
+    expect(escapeRawHtmlTagsOutsideCode("1 < 2 > 0")).toBe("1 < 2 > 0");
+    expect(escapeRawHtmlTagsOutsideCode("x<y")).toBe("x<y");
   });
 });

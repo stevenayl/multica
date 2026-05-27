@@ -32,41 +32,13 @@ import { Slice } from "@tiptap/pm/model";
 
 const LARGE_PASTE_TEXT_THRESHOLD = 50_000;
 
-// Standard HTML elements — CommonMark §6.6 treats any <word> as inline HTML.
-// Non-standard tags get silently dropped by ProseMirror's schema. We escape
-// only tags NOT in this set so legitimate HTML passes through normally.
-const STANDARD_HTML_ELEMENTS = new Set([
-  "a", "abbr", "address", "area", "article", "aside", "audio",
-  "b", "base", "bdi", "bdo", "blockquote", "body", "br", "button",
-  "canvas", "caption", "cite", "code", "col", "colgroup",
-  "data", "datalist", "dd", "del", "details", "dfn", "dialog", "div", "dl", "dt",
-  "em", "embed",
-  "fieldset", "figcaption", "figure", "footer", "form",
-  "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr", "html",
-  "i", "iframe", "img", "input", "ins",
-  "kbd",
-  "label", "legend", "li", "link",
-  "main", "map", "mark", "math", "menu", "meta", "meter",
-  "nav", "noscript",
-  "object", "ol", "optgroup", "option", "output",
-  "p", "param", "picture", "pre", "progress",
-  "q",
-  "rp", "rt", "ruby",
-  "s", "samp", "script", "search", "section", "select", "slot", "small", "source", "span", "strong", "style", "sub", "summary", "sup", "svg",
-  "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time", "title", "tr", "track",
-  "u", "ul",
-  "var", "video",
-  "wbr",
-]);
-
-function escapeTagsInSegment(segment: string): string {
+// CommonMark treats <word> as raw HTML regardless of whether "word" is a real
+// HTML element. For plain-text paste, the user's text is the source of truth, so
+// escape tag-like runs before the Markdown lexer can classify them as HTML.
+function escapeRawHtmlTagsInSegment(segment: string): string {
   return segment.replace(
     /<(\/?[a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?\/?>/g,
-    (match, tagPart: string) => {
-      const tagName = tagPart.replace(/^\//, "").toLowerCase();
-      if (STANDARD_HTML_ELEMENTS.has(tagName)) return match;
-      return match.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-    },
+    (match) => match.replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
   );
 }
 
@@ -99,7 +71,7 @@ function escapeTagsOutsideCodeSpans(line: string): string {
       }
 
       if (!found) {
-        parts.push(escapeTagsInSegment(delimiter));
+        parts.push(escapeRawHtmlTagsInSegment(delimiter));
         i = afterOpener;
       }
       continue;
@@ -107,21 +79,21 @@ function escapeTagsOutsideCodeSpans(line: string): string {
 
     const nextBacktick = line.indexOf("`", i);
     const end = nextBacktick === -1 ? line.length : nextBacktick;
-    parts.push(escapeTagsInSegment(line.slice(i, end)));
+    parts.push(escapeRawHtmlTagsInSegment(line.slice(i, end)));
     i = end;
   }
 
   return parts.join("");
 }
 
-export function escapeNonStandardHtmlTags(text: string): string {
+export function escapeRawHtmlTagsOutsideCode(text: string): string {
   const lines = text.split("\n");
   let inFencedBlock = false;
   let fenceChar = "";
   let fenceLen = 0;
 
   const processed = lines.map((line) => {
-    const fenceMatch = line.match(/^(`{3,}|~{3,})/);
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
     const fence = fenceMatch?.[1];
     if (fence) {
       if (!inFencedBlock) {
@@ -130,7 +102,11 @@ export function escapeNonStandardHtmlTags(text: string): string {
         fenceLen = fence.length;
         return line;
       }
-      if (fence.charAt(0) === fenceChar && fence.length >= fenceLen) {
+      const isClosingFence =
+        fence.charAt(0) === fenceChar &&
+        fence.length >= fenceLen &&
+        /^ {0,3}(`{3,}|~{3,})[ \t]*$/.test(line);
+      if (isClosingFence) {
         inFencedBlock = false;
         return line;
       }
@@ -221,7 +197,7 @@ export function createMarkdownPasteExtension() {
 
               // Everything else (VS Code, text editors, .md files, terminals,
               // web pages): parse text/plain as Markdown.
-              const preprocessed = escapeNonStandardHtmlTags(text);
+              const preprocessed = escapeRawHtmlTagsOutsideCode(text);
               const json = editor.markdown.parse(preprocessed);
               const node = editor.schema.nodeFromJSON(json);
 
