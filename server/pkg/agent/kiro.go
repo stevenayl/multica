@@ -44,6 +44,15 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		return nil, fmt.Errorf("kiro executable not found at %q: %w", execPath, err)
 	}
 
+	// Translate the agent's mcp_config (Claude-style object of objects)
+	// into the array shape ACP `session/new` and `session/load` expect.
+	// Fail closed on malformed JSON so the launch surfaces the real error
+	// instead of silently dropping all MCP servers.
+	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("kiro: invalid mcp_config: %w", err)
+	}
+
 	timeout := opts.Timeout
 	if timeout == 0 {
 		timeout = 20 * time.Minute
@@ -189,7 +198,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			result, err := c.request(runCtx, "session/load", map[string]any{
 				"cwd":        cwd,
 				"sessionId":  opts.ResumeSessionID,
-				"mcpServers": []any{},
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"
@@ -217,7 +226,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
-				"mcpServers": []any{},
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"

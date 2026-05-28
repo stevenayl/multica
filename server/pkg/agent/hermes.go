@@ -2,14 +2,17 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +43,15 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("hermes executable not found at %q: %w", execPath, err)
+	}
+
+	// Translate the agent's mcp_config (Claude-style object of objects)
+	// into the array shape ACP `session/new` expects. Fail closed on
+	// malformed JSON so the launch surfaces the real error instead of
+	// silently dropping all MCP servers.
+	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("hermes: invalid mcp_config: %w", err)
 	}
 
 	timeout := opts.Timeout
@@ -239,7 +251,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				effectiveModel = extractACPCurrentModelID(result)
 			}
 		} else {
-			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
+			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model, mcpServers))
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/new failed: %v", err)
@@ -1193,15 +1205,159 @@ func resolveResumedSessionID(requested string, response json.RawMessage) (string
 // buildHermesSessionParams constructs the params map for the ACP `session/new`
 // request. The `model` field is only included when non-empty so Hermes falls
 // back to its default only when no explicit model was configured.
-func buildHermesSessionParams(cwd, model string) map[string]any {
+//
+// mcpServers should be the ACP-shaped array produced by buildACPMcpServers
+// from the agent's mcp_config; a nil slice is normalised to an empty array
+// so the wire request always carries the field (ACP requires it).
+func buildHermesSessionParams(cwd, model string, mcpServers []any) map[string]any {
+	if mcpServers == nil {
+		mcpServers = []any{}
+	}
 	params := map[string]any{
 		"cwd":        cwd,
-		"mcpServers": []any{},
+		"mcpServers": mcpServers,
 	}
 	if model != "" {
 		params["model"] = model
 	}
 	return params
+}
+
+// buildACPMcpServers translates an agent's Claude-style mcp_config
+// (`{"mcpServers": {"<name>": {...}}}`) into the array shape that ACP's
+// `session/new` and `session/load` requests expect.
+//
+// Each Claude-style entry maps to one of:
+//
+//   - Stdio:  `{name, command, args, env: [{name,value}, ...]}` —
+//     when the entry has a `command` field. No `type` field is emitted;
+//     ACP treats untagged entries as stdio.
+//   - HTTP / SSE: `{type, name, url, headers: [{name,value}, ...]}` —
+//     when the entry has a `url` field. `type` defaults to "http"; Claude's
+//     "sse" and "streamable-http" / "http_streamable" aliases are accepted.
+//
+// Empty / null input returns an empty slice — the launch proceeds with no
+// MCP servers (the existing default for ACP backends). Malformed top-level
+// JSON returns an error so the launch fails closed, mirroring codex's
+// `renderCodexMcpServersBlock` contract. Individual entries that have
+// neither `command` nor `url` are skipped with a warning rather than
+// failing the whole launch, so a single bad entry can't kill the agent.
+//
+// Output entries are sorted by name and each entry's env / headers are
+// sorted by key, so the wire request is deterministic across reruns —
+// useful for tests, log diffs, and reproducibility.
+func buildACPMcpServers(raw json.RawMessage, logger *slog.Logger) ([]any, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return []any{}, nil
+	}
+	var parsed struct {
+		McpServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return nil, fmt.Errorf("parse mcp_config json: %w", err)
+	}
+	if len(parsed.McpServers) == 0 {
+		return []any{}, nil
+	}
+
+	names := make([]string, 0, len(parsed.McpServers))
+	for name := range parsed.McpServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make([]any, 0, len(names))
+	for _, name := range names {
+		entry, err := convertACPMcpServer(name, parsed.McpServers[name])
+		if err != nil {
+			if logger != nil {
+				logger.Warn("skipping invalid mcp_config entry", "name", name, "error", err)
+			}
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+// convertACPMcpServer converts a single Claude-style entry into the ACP
+// McpServer wire shape. Returns an error for entries that can't be
+// classified (no command and no url).
+func convertACPMcpServer(name string, raw json.RawMessage) (map[string]any, error) {
+	var entry struct {
+		Type    string            `json:"type"`
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+	}
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return nil, fmt.Errorf("parse entry: %w", err)
+	}
+
+	command := strings.TrimSpace(entry.Command)
+	url := strings.TrimSpace(entry.URL)
+
+	if command != "" {
+		args := entry.Args
+		if args == nil {
+			args = []string{}
+		}
+		envArr := make([]map[string]any, 0, len(entry.Env))
+		for _, k := range sortedStringMapKeys(entry.Env) {
+			envArr = append(envArr, map[string]any{
+				"name":  k,
+				"value": entry.Env[k],
+			})
+		}
+		return map[string]any{
+			"name":    name,
+			"command": command,
+			"args":    args,
+			"env":     envArr,
+		}, nil
+	}
+
+	if url != "" {
+		t := strings.ToLower(strings.TrimSpace(entry.Type))
+		switch t {
+		case "sse":
+			t = "sse"
+		case "", "http", "streamable-http", "http_streamable":
+			t = "http"
+		default:
+			// Unknown remote transport — degrade to "http" rather than fail.
+			// ACP servers that don't recognise the type will reject the
+			// session/new request and surface a real error to the user.
+			t = "http"
+		}
+		headerArr := make([]map[string]any, 0, len(entry.Headers))
+		for _, k := range sortedStringMapKeys(entry.Headers) {
+			headerArr = append(headerArr, map[string]any{
+				"name":  k,
+				"value": entry.Headers[k],
+			})
+		}
+		return map[string]any{
+			"type":    t,
+			"name":    name,
+			"url":     url,
+			"headers": headerArr,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("entry has neither command nor url")
+}
+
+func sortedStringMapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // hermesToolNameFromTitle extracts a tool name from the ACP tool call title.

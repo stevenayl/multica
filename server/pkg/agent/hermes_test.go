@@ -149,7 +149,7 @@ func TestResolveResumedSessionIDEmptyResponse(t *testing.T) {
 
 func TestBuildHermesSessionParamsIncludesModel(t *testing.T) {
 	t.Parallel()
-	params := buildHermesSessionParams("/tmp/work", "gpt-4o")
+	params := buildHermesSessionParams("/tmp/work", "gpt-4o", nil)
 	if params["cwd"] != "/tmp/work" {
 		t.Errorf("cwd: got %v, want /tmp/work", params["cwd"])
 	}
@@ -163,9 +163,236 @@ func TestBuildHermesSessionParamsIncludesModel(t *testing.T) {
 
 func TestBuildHermesSessionParamsOmitsEmptyModel(t *testing.T) {
 	t.Parallel()
-	params := buildHermesSessionParams("/tmp/work", "")
+	params := buildHermesSessionParams("/tmp/work", "", nil)
 	if _, present := params["model"]; present {
 		t.Error("expected model key to be omitted when model is empty")
+	}
+}
+
+func TestBuildHermesSessionParamsPassesThroughMcpServers(t *testing.T) {
+	t.Parallel()
+	servers := []any{map[string]any{"name": "fetch", "command": "uvx", "args": []string{}, "env": []map[string]any{}}}
+	params := buildHermesSessionParams("/tmp/work", "", servers)
+	got, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(mcpServers): got %d, want 1", len(got))
+	}
+}
+
+func TestBuildHermesSessionParamsNilMcpServersBecomesEmptyArray(t *testing.T) {
+	t.Parallel()
+	// ACP requires the field; nil must surface as `[]` so the wire request
+	// stays well-formed even when no MCP servers are configured.
+	params := buildHermesSessionParams("/tmp/work", "", nil)
+	got, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(got) != 0 {
+		t.Errorf("len(mcpServers): got %d, want 0", len(got))
+	}
+}
+
+// ── buildACPMcpServers ──
+
+func TestBuildACPMcpServersEmptyInputReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []json.RawMessage{nil, {}, json.RawMessage("null"), json.RawMessage(" null "), json.RawMessage("{}"), json.RawMessage(`{"mcpServers":{}}`)} {
+		got, err := buildACPMcpServers(raw, slog.Default())
+		if err != nil {
+			t.Fatalf("raw=%q: unexpected error: %v", string(raw), err)
+		}
+		if got == nil {
+			t.Errorf("raw=%q: got nil, want non-nil empty slice", string(raw))
+		}
+		if len(got) != 0 {
+			t.Errorf("raw=%q: got %d entries, want 0", string(raw), len(got))
+		}
+	}
+}
+
+func TestBuildACPMcpServersTranslatesStdioEntry(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"],"env":{"API_KEY":"secret","HOME":"/tmp"}}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len: got %d, want 1", len(got))
+	}
+	entry, ok := got[0].(map[string]any)
+	if !ok {
+		t.Fatalf("entry type: got %T, want map[string]any", got[0])
+	}
+	if entry["name"] != "fetch" {
+		t.Errorf("name: got %v, want fetch", entry["name"])
+	}
+	if entry["command"] != "uvx" {
+		t.Errorf("command: got %v, want uvx", entry["command"])
+	}
+	if _, hasType := entry["type"]; hasType {
+		t.Errorf("stdio entry should not include type field, got %v", entry["type"])
+	}
+	args, ok := entry["args"].([]string)
+	if !ok || len(args) != 1 || args[0] != "mcp-server-fetch" {
+		t.Errorf("args: got %v, want [mcp-server-fetch]", entry["args"])
+	}
+	envArr, ok := entry["env"].([]map[string]any)
+	if !ok {
+		t.Fatalf("env type: got %T, want []map[string]any", entry["env"])
+	}
+	// Env entries sorted by key for determinism.
+	if len(envArr) != 2 {
+		t.Fatalf("len(env): got %d, want 2", len(envArr))
+	}
+	if envArr[0]["name"] != "API_KEY" || envArr[0]["value"] != "secret" {
+		t.Errorf("env[0]: got %v, want {name:API_KEY,value:secret}", envArr[0])
+	}
+	if envArr[1]["name"] != "HOME" || envArr[1]["value"] != "/tmp" {
+		t.Errorf("env[1]: got %v, want {name:HOME,value:/tmp}", envArr[1])
+	}
+}
+
+func TestBuildACPMcpServersStdioWithoutArgsOrEnvUsesEmptyArrays(t *testing.T) {
+	t.Parallel()
+	// ACP requires args and env to be arrays; missing fields must become
+	// `[]` rather than null so the wire shape passes server-side validation.
+	raw := json.RawMessage(`{"mcpServers":{"minimal":{"command":"echo"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entry := got[0].(map[string]any)
+	if args, ok := entry["args"].([]string); !ok || len(args) != 0 {
+		t.Errorf("args: got %v, want []", entry["args"])
+	}
+	if env, ok := entry["env"].([]map[string]any); !ok || len(env) != 0 {
+		t.Errorf("env: got %v, want []", entry["env"])
+	}
+}
+
+func TestBuildACPMcpServersTranslatesHttpEntry(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"http","url":"https://example.com/mcp","headers":{"Authorization":"Bearer x","X-Trace":"abc"}}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len: got %d, want 1", len(got))
+	}
+	entry := got[0].(map[string]any)
+	if entry["type"] != "http" {
+		t.Errorf("type: got %v, want http", entry["type"])
+	}
+	if entry["name"] != "remote" {
+		t.Errorf("name: got %v, want remote", entry["name"])
+	}
+	if entry["url"] != "https://example.com/mcp" {
+		t.Errorf("url: got %v, want https://example.com/mcp", entry["url"])
+	}
+	headers, ok := entry["headers"].([]map[string]any)
+	if !ok || len(headers) != 2 {
+		t.Fatalf("headers: got %v, want 2 entries", entry["headers"])
+	}
+	if headers[0]["name"] != "Authorization" {
+		t.Errorf("headers[0].name: got %v, want Authorization", headers[0]["name"])
+	}
+}
+
+func TestBuildACPMcpServersDefaultsRemoteTypeToHttp(t *testing.T) {
+	t.Parallel()
+	// A `url` without `type` should default to "http" rather than be classified
+	// as stdio or get dropped.
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"url":"https://example.com/mcp"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entry := got[0].(map[string]any)
+	if entry["type"] != "http" {
+		t.Errorf("type: got %v, want http (default)", entry["type"])
+	}
+}
+
+func TestBuildACPMcpServersSupportsSseTransport(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"sse","url":"https://example.com/sse"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entry := got[0].(map[string]any)
+	if entry["type"] != "sse" {
+		t.Errorf("type: got %v, want sse", entry["type"])
+	}
+}
+
+func TestBuildACPMcpServersAcceptsStreamableHttpAlias(t *testing.T) {
+	t.Parallel()
+	// Claude's MCP CLI uses "streamable-http" / "http_streamable" as
+	// aliases for the http transport; ACP only knows "http", so the
+	// translator must collapse the alias.
+	for _, alias := range []string{"streamable-http", "http_streamable", "Streamable-HTTP"} {
+		raw := json.RawMessage(`{"mcpServers":{"remote":{"type":"` + alias + `","url":"https://example.com/mcp"}}}`)
+		got, err := buildACPMcpServers(raw, slog.Default())
+		if err != nil {
+			t.Fatalf("alias=%s: unexpected error: %v", alias, err)
+		}
+		entry := got[0].(map[string]any)
+		if entry["type"] != "http" {
+			t.Errorf("alias=%s: type got %v, want http", alias, entry["type"])
+		}
+	}
+}
+
+func TestBuildACPMcpServersSortsEntriesByName(t *testing.T) {
+	t.Parallel()
+	// Map iteration is randomized in Go; the translator sorts by name so
+	// the wire request and test assertions are deterministic.
+	raw := json.RawMessage(`{"mcpServers":{"zeta":{"command":"z"},"alpha":{"command":"a"},"mid":{"command":"m"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"alpha", "mid", "zeta"}
+	for i, w := range want {
+		if got[i].(map[string]any)["name"] != w {
+			t.Errorf("position %d: got %v, want %s", i, got[i].(map[string]any)["name"], w)
+		}
+	}
+}
+
+func TestBuildACPMcpServersSkipsInvalidEntriesAndContinues(t *testing.T) {
+	t.Parallel()
+	// An entry with neither command nor url is invalid — drop it with a
+	// warning rather than failing the whole launch, so a single bad entry
+	// in the agent UI doesn't take MCP down for the rest of the agent.
+	raw := json.RawMessage(`{"mcpServers":{"bad":{"args":["nothing"]},"good":{"command":"uvx"}}}`)
+	got, err := buildACPMcpServers(raw, slog.Default())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len: got %d, want 1 (bad entry should be skipped)", len(got))
+	}
+	if got[0].(map[string]any)["name"] != "good" {
+		t.Errorf("kept the wrong entry: %v", got[0])
+	}
+}
+
+func TestBuildACPMcpServersReturnsErrorOnMalformedJSON(t *testing.T) {
+	t.Parallel()
+	_, err := buildACPMcpServers(json.RawMessage(`not json`), slog.Default())
+	if err == nil {
+		t.Fatal("expected error for malformed JSON, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse mcp_config json") {
+		t.Errorf("error message: got %q, want it to mention parsing", err.Error())
 	}
 }
 
@@ -1360,5 +1587,36 @@ func TestHermesBackendDoesNotPromoteOnTransientRetry(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+// TestHermesExecuteFailsClosedOnMalformedMcpConfig pins the contract that
+// a malformed mcp_config aborts the launch *before* the child is spawned.
+// Silently launching with no MCP servers would look indistinguishable
+// from "the saved config was applied" and is exactly the surprise the
+// MCP Tab is meant to remove.
+func TestHermesExecuteFailsClosedOnMalformedMcpConfig(t *testing.T) {
+	t.Parallel()
+
+	// Any existing executable is fine — Execute returns before the spawn.
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\nexit 0\n"))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = backend.Execute(ctx, "prompt", ExecOptions{
+		Timeout:   2 * time.Second,
+		McpConfig: json.RawMessage(`not json`),
+	})
+	if err == nil {
+		t.Fatal("expected Execute to fail closed on malformed mcp_config, got nil error")
+	}
+	if !strings.Contains(err.Error(), "mcp_config") {
+		t.Fatalf("expected error to mention mcp_config, got %q", err)
 	}
 }
