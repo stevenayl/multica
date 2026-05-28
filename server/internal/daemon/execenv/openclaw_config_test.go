@@ -428,6 +428,210 @@ func TestPrepareOpenclawConfigWrapperLoadableUnderIncludeConfinement(t *testing.
 	}
 }
 
+// TestPrepareOpenclawConfigManagedMcpServers — the headline assertion for
+// MUL-2778's OpenClaw MCP wiring. When the agent has a saved mcp_config the
+// wrapper must surface `mcp.servers` populated with the translated entries
+// so the embedded OpenClaw run picks them up via OPENCLAW_CONFIG_PATH. Null
+// / absent mcp_config leaves the wrapper free of an `mcp` key so the user's
+// global config flows through untouched.
+func TestPrepareOpenclawConfigManagedMcpServers(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	userCfgPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: userCfgPath},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	mcpConfig := json.RawMessage(`{
+		"mcpServers": {
+			"context7": {"command": "uvx", "args": ["context7-mcp"]},
+			"docs":     {"url": "https://mcp.example.com", "transport": "streamable-http"}
+		}
+	}`)
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+		OpenclawBin: stub.bin,
+		McpConfig:   mcpConfig,
+	})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	mcp, ok := got["mcp"].(map[string]any)
+	if !ok {
+		t.Fatalf("wrapper missing mcp block: %v", got)
+	}
+	servers, ok := mcp["servers"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcp.servers is not an object: %v", mcp)
+	}
+	if len(servers) != 2 {
+		t.Errorf("mcp.servers has %d entries, want 2: %v", len(servers), servers)
+	}
+	stdioEntry, ok := servers["context7"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcp.servers.context7 missing or not an object: %v", servers)
+	}
+	if stdioEntry["command"] != "uvx" {
+		t.Errorf("context7.command = %v, want \"uvx\"", stdioEntry["command"])
+	}
+	args, _ := stdioEntry["args"].([]any)
+	if len(args) != 1 || args[0] != "context7-mcp" {
+		t.Errorf("context7.args = %v, want [\"context7-mcp\"]", args)
+	}
+	httpEntry, ok := servers["docs"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcp.servers.docs missing or not an object: %v", servers)
+	}
+	if httpEntry["url"] != "https://mcp.example.com" {
+		t.Errorf("docs.url = %v", httpEntry["url"])
+	}
+	// transport must survive the pass-through verbatim — OpenClaw needs the
+	// raw field name (not Claude's `type`) to pick streamable-http transport.
+	if httpEntry["transport"] != "streamable-http" {
+		t.Errorf("docs.transport = %v, want \"streamable-http\"", httpEntry["transport"])
+	}
+}
+
+// TestPrepareOpenclawConfigNullMcpConfigOmitsBlock — null / absent
+// mcp_config must NOT add an `mcp` key. Otherwise the empty managed marker
+// would shadow whatever mcp.servers the user has in their global config,
+// silently breaking MCP for runtimes that inherit the user setup.
+func TestPrepareOpenclawConfigNullMcpConfigOmitsBlock(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userCfgPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: userCfgPath},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	cases := map[string]json.RawMessage{
+		"nil":   nil,
+		"empty": json.RawMessage(""),
+		"null":  json.RawMessage("null"),
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+				OpenclawBin: stub.bin,
+				McpConfig:   raw,
+			})
+			if err != nil {
+				t.Fatalf("prepareOpenclawConfig: %v", err)
+			}
+			got := mustReadJSON(t, result.ConfigPath)
+			if _, present := got["mcp"]; present {
+				t.Errorf("wrapper has mcp block when mcp_config = %q: %v", name, got["mcp"])
+			}
+		})
+	}
+}
+
+// TestPrepareOpenclawConfigEmptyManagedSetEmitsEmptyMap — `{}` and
+// `{"mcpServers":{}}` mean "admin saved an explicit empty set". The wrapper
+// must still emit `mcp.servers = {}` so the intent is grep-able on disk and
+// distinguishable from "no managed config" (which omits the key entirely).
+// Mirrors `hasManagedCodexMcpConfig`'s strict-empty contract.
+func TestPrepareOpenclawConfigEmptyManagedSetEmitsEmptyMap(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userCfgPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	cases := map[string]json.RawMessage{
+		"object_empty":          json.RawMessage(`{}`),
+		"mcp_servers_empty_map": json.RawMessage(`{"mcpServers": {}}`),
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			stub := installOpenclawStub(t, map[string]openclawResponse{
+				"config file":                   {stdout: userCfgPath},
+				"config get agents.list --json": {stdout: "null"},
+			})
+			result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+				OpenclawBin: stub.bin,
+				McpConfig:   raw,
+			})
+			if err != nil {
+				t.Fatalf("prepareOpenclawConfig: %v", err)
+			}
+			got := mustReadJSON(t, result.ConfigPath)
+			mcp, ok := got["mcp"].(map[string]any)
+			if !ok {
+				t.Fatalf("wrapper missing mcp block (managed empty must still be present): %v", got)
+			}
+			servers, ok := mcp["servers"].(map[string]any)
+			if !ok {
+				t.Fatalf("mcp.servers is not an object: %v", mcp)
+			}
+			if len(servers) != 0 {
+				t.Errorf("mcp.servers has %d entries on managed-empty, want 0: %v", len(servers), servers)
+			}
+		})
+	}
+}
+
+// TestPrepareOpenclawConfigFailsClosedOnMalformedMcpConfig — keeping with
+// the fail-closed posture used for the rest of the preparer: a malformed
+// mcp_config must not write any wrapper file, so the daemon surfaces the
+// error instead of booting OpenClaw with an empty / inherited MCP set the
+// admin didn't expect.
+func TestPrepareOpenclawConfigFailsClosedOnMalformedMcpConfig(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userCfgPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	cases := map[string]json.RawMessage{
+		"unparseable_json":      json.RawMessage(`{not-json}`),
+		"entry_missing_command": json.RawMessage(`{"mcpServers": {"bad": {}}}`),
+		"entry_wrong_shape":     json.RawMessage(`{"mcpServers": {"bad": "not-an-object"}}`),
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			stub := installOpenclawStub(t, map[string]openclawResponse{
+				"config file":                   {stdout: userCfgPath},
+				"config get agents.list --json": {stdout: "null"},
+			})
+			_, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+				OpenclawBin: stub.bin,
+				McpConfig:   raw,
+			})
+			if err == nil {
+				t.Fatalf("prepareOpenclawConfig succeeded on %s; expected fail closed", name)
+			}
+			if !strings.Contains(err.Error(), "mcp_config") && !strings.Contains(err.Error(), "mcp_servers") {
+				t.Errorf("error %q does not name the mcp_config step", err.Error())
+			}
+		})
+	}
+}
+
 // TestPrepareOpenclawSkillWriteMatchesScanPath is the regression test the
 // MUL-2219 DoD calls out: the directory Multica writes skills into MUST be
 // the same directory the OpenClaw scanner reads from. We assert this by

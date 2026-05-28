@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -32,6 +34,13 @@ type OpenclawConfigPrep struct {
 	OpenclawBin string
 	// Timeout caps each CLI invocation. Zero falls back to openclawCLITimeout.
 	Timeout time.Duration
+	// McpConfig is the agent's saved `mcp_config` JSON (Claude-style
+	// `{"mcpServers": {"<name>": {...}}}`). When non-null the wrapper pins
+	// `mcp.servers` to the managed set so OpenClaw resolves MCP from the
+	// daemon's authoritative list instead of the user's global `mcp.servers`.
+	// Null / empty means inherit the user's global config — same three-state
+	// semantics codex uses (`hasManagedCodexMcpConfig`).
+	McpConfig json.RawMessage
 }
 
 // OpenclawConfigResult is what prepareOpenclawConfig returns to its callers
@@ -124,7 +133,18 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 		}
 	}
 
-	cfg := buildPerTaskOpenclawConfig(activePath, exists, resolvedList, workDir)
+	// Parse the agent's managed mcp_config (if any) before writing the wrapper
+	// so a malformed value fails the prepare step rather than crashing the
+	// openclaw subprocess later. Same fail-closed posture as Codex's
+	// ensureCodexMcpConfig — silent fallback to the user's global mcp.servers
+	// would be indistinguishable from "the managed set applied" and is exactly
+	// the surprise the MCP Tab is supposed to remove.
+	managedMcp, hasManagedMcp, err := openclawManagedMcpServers(opts.McpConfig)
+	if err != nil {
+		return OpenclawConfigResult{}, fmt.Errorf("render openclaw mcp_config: %w", err)
+	}
+
+	cfg := buildPerTaskOpenclawConfig(activePath, exists, resolvedList, workDir, managedMcp, hasManagedMcp)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -163,7 +183,14 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 // config containing only the workspace override. There is no user data to
 // $include here, so this is not the silent-fallback case the reviewer
 // flagged.
-func buildPerTaskOpenclawConfig(activePath string, exists bool, resolvedList []any, workDir string) map[string]any {
+//
+// hasManagedMcp distinguishes "agent has a managed mcp_config (possibly an
+// empty set)" from "agent inherits the user's global mcp.servers". When
+// true we pin `mcp.servers` to managedMcp on the wrapper; the resulting
+// merge with the include lets the managed entries win on name collisions.
+// Empty managed set (`{}` / `{"mcpServers":{}}`) is honoured as "admin saved
+// no servers" — mirrors `hasManagedCodexMcpConfig`.
+func buildPerTaskOpenclawConfig(activePath string, exists bool, resolvedList []any, workDir string, managedMcp map[string]any, hasManagedMcp bool) map[string]any {
 	agents := map[string]any{
 		"defaults": map[string]any{"workspace": workDir},
 	}
@@ -172,6 +199,20 @@ func buildPerTaskOpenclawConfig(activePath string, exists bool, resolvedList []a
 	}
 	cfg := map[string]any{
 		"agents": agents,
+	}
+	if hasManagedMcp {
+		// Always emit `mcp.servers` (even when empty) so the wrapper's intent
+		// — "admin manages this set" — is grep-able on disk and visible to
+		// OpenClaw's loader. The merge against the include's `mcp.servers`
+		// gives managed entries priority by name. Strict-mode replacement
+		// (drop user-only servers entirely) would require OpenClaw to do a
+		// per-key replace rather than a deep merge at `mcp.servers`; we
+		// document that caveat rather than rely on undocumented behaviour.
+		servers := managedMcp
+		if servers == nil {
+			servers = map[string]any{}
+		}
+		cfg["mcp"] = map[string]any{"servers": servers}
 	}
 	if exists {
 		// Array form (not single-file form) so OpenClaw deep-merges the
@@ -313,6 +354,61 @@ func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, e
 		return "", fmt.Errorf("openclaw %s: %w", strings.Join(args, " "), err)
 	}
 	return string(raw), nil
+}
+
+// openclawManagedMcpServers parses the agent's `mcp_config` JSON and returns
+// the map of server name → server config that the wrapper should emit at
+// `mcp.servers`. The second return is `true` when the agent has a managed
+// mcp_config saved (non-null) — including the explicit empty set
+// `{}` / `{"mcpServers":{}}` — and `false` when the field is null/absent so
+// the user's global config flows through unmodified.
+//
+// Input shape mirrors the rest of Multica: Claude-style
+// `{"mcpServers": {"<name>": {...}}}`. The server-entry fields pass through
+// verbatim. OpenClaw's stdio schema uses the same camelCase keys (`command`,
+// `args`, `env`) as Claude; HTTP/SSE entries should set OpenClaw's
+// `transport` field directly (e.g. `"transport": "streamable-http"`) rather
+// than Claude's `type` since OpenClaw does not recognise the latter.
+//
+// Each entry must declare either `command` (stdio) or `url` (http/sse); any
+// other shape returns an error so the launch fails closed with an actionable
+// message rather than running with a server OpenClaw will refuse to start.
+func openclawManagedMcpServers(raw json.RawMessage) (map[string]any, bool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, false, nil
+	}
+	var parsed struct {
+		McpServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return nil, false, fmt.Errorf("parse mcp_config json: %w", err)
+	}
+	if len(parsed.McpServers) == 0 {
+		return map[string]any{}, true, nil
+	}
+	names := make([]string, 0, len(parsed.McpServers))
+	for name := range parsed.McpServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make(map[string]any, len(names))
+	for _, name := range names {
+		var entry map[string]any
+		if err := json.Unmarshal(parsed.McpServers[name], &entry); err != nil {
+			return nil, false, fmt.Errorf("mcp_servers.%s: %w", name, err)
+		}
+		if entry == nil {
+			return nil, false, fmt.Errorf("mcp_servers.%s must be a JSON object", name)
+		}
+		command, _ := entry["command"].(string)
+		url, _ := entry["url"].(string)
+		if strings.TrimSpace(command) == "" && strings.TrimSpace(url) == "" {
+			return nil, false, fmt.Errorf("mcp_servers.%s must declare either `command` (stdio) or `url` (http/sse)", name)
+		}
+		out[name] = entry
+	}
+	return out, true, nil
 }
 
 // isOpenclawKeyMissing returns true when the CLI error indicates the asked-
