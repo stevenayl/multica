@@ -295,9 +295,10 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.12",
         date: "2026-05-29",
-        title: "Korean Localization and Smarter Issue Workflows",
+        title: "Issue Session Resume and Korean Support",
         changes: [],
         features: [
+          "Agents that continue work from an Issue comment now resume the previous session instead of starting over, keeping the task context intact",
           "Multica now supports Korean across the app, public site, and documentation, including Korean docs pages and localized date formatting",
           "Issue pages now keep active agent work visible near the title, with a cleaner view when multiple agents are working at once",
           "Agents can scan Issue discussions faster with thread previews, reply counts, and recent activity before opening the full conversation",

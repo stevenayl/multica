@@ -295,9 +295,10 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.12",
         date: "2026-05-29",
-        title: "韩语支持与更顺畅的 Issue 协作",
+        title: "Issue 任务续接与韩语支持",
         changes: [],
         features: [
+          "智能体在 Issue 评论区继续任务时，会接着之前的会话继续，不再新开会话，任务上下文可以保留下来",
           "Multica 现在支持韩语界面、官网和文档，包含完整韩语文档与本地化日期显示",
           "Issue 页面会在标题附近固定显示正在工作的智能体，多智能体同时工作时也能更清楚地查看",
           "智能体读取 Issue 讨论时可以先看到线程摘要、回复数量和最近活跃时间，更快找到需要跟进的上下文",
