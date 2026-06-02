@@ -231,6 +231,10 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// MUL-2429); agent-assigned autopilots go through the standard issue
 	// path. Both code paths land in agent_task_queue with agent_id = leader.
 	if ap.AssigneeType == "squad" {
+		// NOTE: private-leader gate not needed here — the autopilot actor is
+		// always the leader agent itself (actorType="agent"), which passes
+		// canAccessPrivateAgent unconditionally. If this assumption changes,
+		// add a canEnqueueSquadLeader check.
 		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, pgtype.UUID{}); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
