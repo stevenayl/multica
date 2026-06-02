@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useLocation, useNavigate, useRouteError } from "react-router-dom";
-import { AlertTriangle, RotateCw, Send } from "lucide-react";
+import { AlertTriangle, RotateCw, Send, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useModalStore } from "@multica/core/modals";
 import { useTabStore } from "@/stores/tab-store";
@@ -93,6 +93,14 @@ export function DesktopRouteErrorPage() {
             Go to issues
           </Button>
         ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => useTabStore.getState().closeActiveTab()}
+        >
+          <X className="mr-2 h-4 w-4" aria-hidden="true" />
+          Close tab
+        </Button>
         <Button
           type="button"
           onClick={() =>

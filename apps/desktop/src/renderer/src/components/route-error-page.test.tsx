@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 
 const openModal = vi.fn();
 const reloadActiveTab = vi.fn();
+const closeActiveTab = vi.fn();
 
 vi.mock("@multica/core/modals", () => ({
   useModalStore: {
@@ -13,7 +14,7 @@ vi.mock("@multica/core/modals", () => ({
 
 vi.mock("@/stores/tab-store", () => ({
   useTabStore: {
-    getState: () => ({ reloadActiveTab }),
+    getState: () => ({ reloadActiveTab, closeActiveTab }),
   },
 }));
 
@@ -28,6 +29,7 @@ describe("DesktopRouteErrorPage", () => {
   beforeEach(() => {
     openModal.mockReset();
     reloadActiveTab.mockReset();
+    closeActiveTab.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -48,6 +50,18 @@ describe("DesktopRouteErrorPage", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /reload tab/i }));
     expect(reloadActiveTab).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Close tab as the always-safe escape from a crashing route", async () => {
+    const router = createMemoryRouter(
+      [{ path: "/acme/issues/1", element: <Boom />, errorElement: <DesktopRouteErrorPage /> }],
+      { initialEntries: ["/acme/issues/1"] },
+    );
+
+    render(<RouterProvider router={router} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /close tab/i }));
+    expect(closeActiveTab).toHaveBeenCalledTimes(1);
   });
 
   it("opens the existing feedback modal with a structured markdown report only after click", async () => {
