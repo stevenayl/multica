@@ -102,6 +102,7 @@ export function WorkspaceTab() {
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
   const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
+  const [logoUrlInput, setLogoUrlInput] = useState(workspace?.avatar_url ?? "");
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -134,6 +135,10 @@ export function WorkspaceTab() {
     setIssuePrefix(workspace?.issue_prefix ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
+
+  useEffect(() => {
+    setLogoUrlInput(workspace?.avatar_url ?? "");
+  }, [workspace?.id, workspace?.avatar_url]);
 
   // Letters + digits only, uppercase, capped at 10 chars. The backend
   // uppercases and trims on its side too — this is purely a UX guardrail
@@ -194,6 +199,9 @@ export function WorkspaceTab() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { upload, uploading } = useFileUpload(api);
+  const normalizedLogoUrl = logoUrlInput.trim();
+  const logoUrlChanged =
+    !!workspace && normalizedLogoUrl !== (workspace.avatar_url ?? "");
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!workspace) return;
@@ -208,9 +216,29 @@ export function WorkspaceTab() {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
+      setLogoUrlInput(updated.avatar_url ?? result.link);
       toast.success(t(($) => $.workspace.toast_logo_updated));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.workspace.toast_logo_failed));
+    }
+  };
+
+  const handleLogoUrlSave = async () => {
+    if (!workspace || !canManageWorkspace || !logoUrlChanged) return;
+    setActionId("logo-url");
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        avatar_url: normalizedLogoUrl,
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      setLogoUrlInput(updated.avatar_url ?? normalizedLogoUrl);
+      toast.success(t(($) => $.workspace.toast_logo_updated));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.workspace.toast_logo_failed));
+    } finally {
+      setActionId(null);
     }
   };
 
@@ -300,8 +328,45 @@ export function WorkspaceTab() {
                 className="hidden"
                 onChange={handleLogoUpload}
               />
-              <div className="text-xs text-muted-foreground">
-                {t(($) => $.workspace.click_logo_hint)}
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  {t(($) => $.workspace.click_logo_hint)}
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <div className="min-w-0 flex-1">
+                    <Label className="sr-only" htmlFor="workspace-logo-url">
+                      {t(($) => $.workspace.logo_url_label)}
+                    </Label>
+                    <Input
+                      id="workspace-logo-url"
+                      type="url"
+                      value={logoUrlInput}
+                      onChange={(e) => setLogoUrlInput(e.target.value)}
+                      disabled={!canManageWorkspace || actionId === "logo-url"}
+                      className="h-8 text-xs"
+                      placeholder={t(($) => $.workspace.logo_url_placeholder)}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1.5"
+                    onClick={handleLogoUrlSave}
+                    disabled={
+                      !canManageWorkspace ||
+                      !logoUrlChanged ||
+                      actionId === "logo-url"
+                    }
+                  >
+                    {actionId === "logo-url" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Save className="h-3.5 w-3.5" />
+                    )}
+                    {t(($) => $.workspace.logo_url_save)}
+                  </Button>
+                </div>
               </div>
             </div>
             <div>

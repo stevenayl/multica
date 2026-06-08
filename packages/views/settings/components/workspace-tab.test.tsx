@@ -17,6 +17,7 @@ const workspaceRef = vi.hoisted(() => ({
     description: "",
     context: "",
     issue_prefix: "TES",
+    avatar_url: null as string | null,
     repos: [] as { url: string }[],
   },
 }));
@@ -115,6 +116,7 @@ describe("WorkspaceTab — task prefix editing", () => {
       description: "",
       context: "",
       issue_prefix: "TES",
+      avatar_url: null,
       repos: [],
     };
     membersRef.current = [{ user_id: "user-1", role: "owner" }];
@@ -253,6 +255,26 @@ describe("WorkspaceTab — task prefix editing", () => {
     expect(mockUpdateWorkspace).toHaveBeenCalledWith(
       "workspace-1",
       expect.objectContaining({ avatar_url: "/uploads/workspace-logo.png" }),
+    );
+  });
+
+  it("saves a pasted logo URL without using the native file picker", async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    await user.type(
+      screen.getByLabelText("Logo URL"),
+      "https://assets.ven.com.au/ven-logo.png",
+    );
+    await user.click(screen.getByRole("button", { name: "Save logo" }));
+
+    await waitFor(() =>
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith(
+        "workspace-1",
+        expect.objectContaining({
+          avatar_url: "https://assets.ven.com.au/ven-logo.png",
+        }),
+      ),
     );
   });
 });
