@@ -21,11 +21,14 @@ import {
   Monitor,
   ChevronRight,
   Settings,
+  SlidersHorizontal,
+  Key,
   LogOut,
   Plus,
   Check,
   BookOpenText,
   SquarePen,
+  User,
   CircleUser,
   FolderKanban,
   BarChart3,
@@ -479,28 +482,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     }
                   />
                   <DropdownMenuContent
+                    data-testid="sidebar-workspace-menu"
                     className="w-auto min-w-56"
                     align="start"
                     side="bottom"
                     sideOffset={4}
                   >
-                    <div className="flex items-center gap-2.5 px-2 py-1.5">
-                      <ActorAvatar
-                        name={user?.name ?? ""}
-                        initials={(user?.name ?? "U").charAt(0).toUpperCase()}
-                        avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
-                        size={32}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium leading-tight">
-                          {user?.name}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground leading-tight">
-                          {user?.email}
-                        </p>
-                      </div>
-                    </div>
-                    <DropdownMenuSeparator />
                     <DropdownMenuGroup>
                       <DropdownMenuLabel className="text-xs text-muted-foreground">
                         {t(($) => $.sidebar.workspaces_label)}
@@ -568,13 +555,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         </DropdownMenuGroup>
                       </>
                     )}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem variant="destructive" onClick={logout}>
-                        <LogOut className="h-3.5 w-3.5" />
-                        {t(($) => $.sidebar.log_out)}
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 {searchSlot}
@@ -720,7 +700,64 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           </SidebarGroup>
         </SidebarContent>
 
-        <SidebarFooter className="p-2" />
+        <SidebarFooter className="p-2">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <SidebarMenuButton
+                      data-testid="sidebar-account-menu-trigger"
+                      className="h-auto min-h-10 justify-start gap-2 px-2 py-2 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70"
+                    >
+                      <ActorAvatar
+                        name={user?.name ?? ""}
+                        initials={(user?.name ?? "U").charAt(0).toUpperCase()}
+                        avatarUrl={resolvePublicFileUrl(user?.avatar_url)}
+                        size={28}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium leading-tight text-foreground">
+                          {user?.name}
+                        </span>
+                        <span className="block truncate text-xs leading-tight text-muted-foreground">
+                          {user?.email}
+                        </span>
+                      </span>
+                    </SidebarMenuButton>
+                  }
+                />
+                <DropdownMenuContent
+                  className="w-56"
+                  align="end"
+                  side="right"
+                  sideOffset={8}
+                >
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    {t(($) => $.sidebar.account_label)}
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem render={<AppLink href={`${p.settings()}?tab=profile`} />}>
+                    <User className="h-3.5 w-3.5" />
+                    {t(($) => $.sidebar.account_profile)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem render={<AppLink href={`${p.settings()}?tab=preferences`} />}>
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    {t(($) => $.sidebar.account_preferences)}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem render={<AppLink href={`${p.settings()}?tab=tokens`} />}>
+                    <Key className="h-3.5 w-3.5" />
+                    {t(($) => $.sidebar.account_api_tokens)}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={logout}>
+                    <LogOut className="h-3.5 w-3.5" />
+                    {t(($) => $.sidebar.log_out)}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
         <SidebarRail />
       </Sidebar>
   );

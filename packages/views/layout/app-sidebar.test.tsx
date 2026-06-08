@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
@@ -73,6 +73,7 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
           children,
           className,
           "data-active": isActive ? "true" : undefined,
+          ...props,
         })
       : button;
   },
@@ -81,7 +82,17 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
 }));
 vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuContent: () => null,
+  DropdownMenuContent: ({
+    children,
+    align: _align,
+    side: _side,
+    sideOffset: _sideOffset,
+    ...props
+  }: React.HTMLAttributes<HTMLDivElement> & {
+    align?: string;
+    side?: string;
+    sideOffset?: number;
+  }) => <div {...props}>{children}</div>,
   DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -116,7 +127,15 @@ vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 
 vi.mock("@multica/core/auth", () => ({
-  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "user-1" } }),
+  useAuthStore: (selector: (state: { user: { id: string; name: string; email: string; avatar_url: null } }) => unknown) =>
+    selector({
+      user: {
+        id: "user-1",
+        name: "Steve Aylward",
+        email: "steve@ven.com.au",
+        avatar_url: null,
+      },
+    }),
 }));
 vi.mock("@multica/core/paths", () => ({
   paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
@@ -222,5 +241,17 @@ describe("PinRow", () => {
     screen.getByRole("button", { name: "Search" }).click();
     screen.getByRole("button", { name: "New Task" }).click();
     expect(openCreateIssueWithPreference).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves the account profile from the workspace switcher to the sidebar footer", () => {
+    render(<AppSidebar />);
+
+    const workspaceMenu = screen.getByTestId("sidebar-workspace-menu");
+    expect(within(workspaceMenu).queryByText("Steve Aylward")).not.toBeInTheDocument();
+    expect(within(workspaceMenu).queryByText("steve@ven.com.au")).not.toBeInTheDocument();
+
+    const accountTrigger = screen.getByTestId("sidebar-account-menu-trigger");
+    expect(within(accountTrigger).getByText("Steve Aylward")).toBeInTheDocument();
+    expect(within(accountTrigger).getByText("steve@ven.com.au")).toBeInTheDocument();
   });
 	});
